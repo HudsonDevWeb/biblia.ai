@@ -1,7 +1,7 @@
 [package]
-name = "app"
-version = "0.1.0"
-description = "A Tauri App"
+name = "biblia"
+version = "1.0.0"
+description = "Bíblia Desktop"
 authors = ["you"]
 license = ""
 repository = ""

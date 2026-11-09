@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Bíblia",
         "width": 1150,
         "height": 780,
