@@ -30,6 +30,11 @@ export function ReaderHeader({
   return (
     <header className="h-14 border-b border-border bg-card/80 backdrop-blur px-4 flex items-center justify-between gap-2 shrink-0 select-none relative z-30">
       <div className="flex items-center gap-2">
+        <img
+          src="/logo-biblia.png"
+          alt="Bíblia"
+          className="h-7 w-7 rounded-lg object-contain select-none shrink-0"
+        />
         <Button
           variant="outline"
           size="sm"
