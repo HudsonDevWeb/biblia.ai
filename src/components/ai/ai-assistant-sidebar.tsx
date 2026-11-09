@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect } from 'react'
 import {
   Sparkles,
   X,
@@ -6,75 +6,81 @@ import {
   Settings,
   BookOpen,
   Loader2,
-  Trash2,
   Plus,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
+  History,
+} from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { AiMessageBubble, type ChatMessage } from '@/components/ai/ai-message-bubble'
+import { ChatHistoryDrawer } from '@/components/ai/chat-history-drawer'
+import { type BibleBookMetadata } from '@/data/bible-metadata'
+import { type ChatSession } from '@/types/chat-session'
 import {
-  AiMessageBubble,
-  type ChatMessage,
-} from "@/components/ai/ai-message-bubble";
-import { type BibleBookMetadata } from "@/data/bible-metadata";
-import { cn } from "@/lib/utils";
+  loadAllSessions,
+  saveSession,
+  deleteSession,
+  clearAllSessions,
+  getActiveSessionId,
+  setActiveSessionId,
+} from '@/lib/chat-storage'
+import { cn } from '@/lib/utils'
 
 interface AiAssistantSidebarProps {
-  isOpen: boolean;
-  book: BibleBookMetadata;
-  chapter: number;
-  selectedVersesText: { verse: number; text: string }[];
-  onClose: () => void;
-  onClearSelectedVerses: () => void;
+  isOpen: boolean
+  book: BibleBookMetadata
+  chapter: number
+  selectedVersesText: { verse: number; text: string }[]
+  onClose: () => void
+  onClearSelectedVerses: () => void
 }
 
-const API_KEY_STORAGE = "bible_ai_gemini_key";
-const CHAT_HISTORY_STORAGE = "bible_ai_chat_history";
-const CHAT_FONT_SIZE_STORAGE = "bible_ai_chat_font_size";
-const CHAT_WIDTH_STORAGE = "bible_ai_chat_width";
+const API_KEY_STORAGE = 'bible_ai_gemini_key'
+const CHAT_FONT_SIZE_STORAGE = 'bible_ai_chat_font_size'
+const CHAT_WIDTH_STORAGE = 'bible_ai_chat_width'
 
 const CANDIDATE_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-3.8-flash",
-  "gemini-1.5-flash",
-  "gemini-1.5-pro",
-  "gemma-4-26b-a4b-it",
-];
+  'gemma-4-26b-a4b-it',
+  'gemini-2.5-flash',
+  'gemini-3.8-flash',
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+]
 
 interface ApiResponsePart {
-  thought?: boolean;
-  text?: string;
+  thought?: boolean
+  text?: string
 }
 
 interface ApiResponseCandidate {
   content?: {
-    parts?: ApiResponsePart[];
-  };
+    parts?: ApiResponsePart[]
+  }
 }
 
 interface ApiResponseBody {
-  candidates?: ApiResponseCandidate[];
+  candidates?: ApiResponseCandidate[]
 }
 
 function extractResponseText(data: ApiResponseBody): string {
-  const parts = data?.candidates?.[0]?.content?.parts || [];
+  const parts = data?.candidates?.[0]?.content?.parts || []
   if (!Array.isArray(parts) || parts.length === 0) {
-    return "Não foi possível obter resposta do assistente.";
+    return 'Não foi possível obter resposta do assistente.'
   }
 
-  const answerParts = parts.filter((p) => !p.thought && Boolean(p.text));
+  const answerParts = parts.filter((p) => !p.thought && Boolean(p.text))
   if (answerParts.length > 0) {
-    return answerParts.map((p) => p.text).join("\n\n");
+    return answerParts.map((p) => p.text).join('\n\n')
   }
 
-  return parts[parts.length - 1]?.text || "Sem resposta.";
+  return parts[parts.length - 1]?.text || 'Sem resposta.'
 }
 
 const DEFAULT_WELCOME_MESSAGE: ChatMessage = {
-  id: "welcome",
-  role: "assistant",
+  id: 'welcome',
+  role: 'assistant',
   content:
-    "Olá! Sou seu assistente de estudos bíblicos, baseado nos princípios e teologia da Igreja Adventista do Sétimo Dia. Fique à vontade para fazer qualquer pergunta ou selecionar versículos para análise direta e concisa.",
+    'Olá! Sou seu assistente de estudos bíblicos, baseado nos princípios e teologia da Igreja Adventista do Sétimo Dia. Fique à vontade para fazer qualquer pergunta ou selecionar versículos para análise direta e concisa.',
   timestamp: new Date(),
-};
+}
 
 export function AiAssistantSidebar({
   isOpen,
@@ -84,178 +90,234 @@ export function AiAssistantSidebar({
   onClose,
   onClearSelectedVerses,
 }: AiAssistantSidebarProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    try {
-      const saved = localStorage.getItem(CHAT_HISTORY_STORAGE);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map(
-            (m: {
-              id: string;
-              role: "user" | "assistant";
-              content: string;
-              timestamp: string | Date;
-            }) => ({
-              ...m,
-              timestamp: new Date(m.timestamp),
-            }),
-          );
-        }
-      }
-    } catch {
-      // ignore
+  const [sessions, setSessions] = useState<ChatSession[]>(() => loadAllSessions())
+  const [showHistory, setShowHistory] = useState(false)
+
+  const [activeSessionId, setCurActiveSessionId] = useState<string>(() => {
+    const saved = getActiveSessionId()
+    const all = loadAllSessions()
+    if (saved && all.some((s) => s.id === saved)) {
+      return saved
     }
-    return [DEFAULT_WELCOME_MESSAGE];
-  });
+    const first = all[0]
+    return first ? first.id : String(Date.now())
+  })
+
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    const all = loadAllSessions()
+    const active = all.find((s) => s.id === activeSessionId)
+    if (active && active.messages.length > 0) {
+      return active.messages.map((m) => ({
+        ...m,
+        timestamp: new Date(m.timestamp),
+      }))
+    }
+    return [DEFAULT_WELCOME_MESSAGE]
+  })
 
   const [chatFontSize, setChatFontSize] = useState<number>(() => {
     try {
-      const saved = localStorage.getItem(CHAT_FONT_SIZE_STORAGE);
+      const saved = localStorage.getItem(CHAT_FONT_SIZE_STORAGE)
       if (saved) {
-        const num = Number(saved);
-        if (num >= 12 && num <= 24) return num;
+        const num = Number(saved)
+        if (num >= 12 && num <= 24) return num
       }
     } catch {
       // ignore
     }
-    return 13;
-  });
+    return 13
+  })
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     try {
-      const saved = localStorage.getItem(CHAT_WIDTH_STORAGE);
+      const saved = localStorage.getItem(CHAT_WIDTH_STORAGE)
       if (saved) {
-        const num = Number(saved);
-        if (num >= 320 && num <= 900) return num;
+        const num = Number(saved)
+        if (num >= 320 && num <= 900) return num
       }
     } catch {
       // ignore
     }
-    return 400;
-  });
+    return 400
+  })
 
-  const [isDragging, setIsDragging] = useState(false);
-  const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [showConfig, setShowConfig] = useState(false);
+  const [isDragging, setIsDragging] = useState(false)
+  const [input, setInput] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+  const [showConfig, setShowConfig] = useState(false)
   const [apiKey, setApiKey] = useState(() => {
-    return localStorage.getItem(API_KEY_STORAGE) || "";
-  });
-  const [tempApiKey, setTempApiKey] = useState(apiKey);
+    return localStorage.getItem(API_KEY_STORAGE) || ''
+  })
+  const [tempApiKey, setTempApiKey] = useState(apiKey)
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!isDragging) return;
+    if (!isDragging) return
 
     const handleMouseMove = (e: MouseEvent) => {
-      const newWidth = window.innerWidth - e.clientX;
-      const minWidth = 320;
-      const maxWidth = Math.min(950, Math.floor(window.innerWidth * 0.7));
+      const newWidth = window.innerWidth - e.clientX
+      const minWidth = 320
+      const maxWidth = Math.min(950, Math.floor(window.innerWidth * 0.7))
       if (newWidth >= minWidth && newWidth <= maxWidth) {
-        setSidebarWidth(newWidth);
+        setSidebarWidth(newWidth)
       }
-    };
+    }
 
     const handleMouseUp = () => {
-      setIsDragging(false);
-    };
+      setIsDragging(false)
+    }
 
-    window.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
 
     return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-  }, [isDragging]);
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+  }, [isDragging])
 
   useEffect(() => {
     try {
-      localStorage.setItem(CHAT_WIDTH_STORAGE, String(sidebarWidth));
+      localStorage.setItem(CHAT_WIDTH_STORAGE, String(sidebarWidth))
     } catch {
       // ignore
     }
-  }, [sidebarWidth]);
+  }, [sidebarWidth])
 
   useEffect(() => {
     try {
-      localStorage.setItem(CHAT_FONT_SIZE_STORAGE, String(chatFontSize));
+      localStorage.setItem(CHAT_FONT_SIZE_STORAGE, String(chatFontSize))
     } catch {
       // ignore
     }
-  }, [chatFontSize]);
+  }, [chatFontSize])
 
   useEffect(() => {
-    try {
-      localStorage.setItem(CHAT_HISTORY_STORAGE, JSON.stringify(messages));
-    } catch {
-      // ignore
-    }
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
-  if (!isOpen) return null;
+  if (!isOpen) return null
+
+  const persistMessagesToSession = (
+    newMessages: ChatMessage[],
+    initialPrompt?: string
+  ) => {
+    const existing = sessions.find((s) => s.id === activeSessionId)
+    let title = existing?.title
+
+    if (!title || title === 'Nova Conversa') {
+      if (initialPrompt) {
+        title = initialPrompt.slice(0, 36)
+      } else if (selectedVersesText.length > 0) {
+        title = `${book.name} ${chapter}:${selectedVersesText.map((v) => v.verse).join(',')}`
+      } else {
+        title = 'Estudo Bíblico'
+      }
+    }
+
+    const session: ChatSession = {
+      id: activeSessionId,
+      title,
+      createdAt: existing?.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      messages: newMessages,
+    }
+
+    saveSession(session)
+    setSessions(loadAllSessions())
+  }
 
   const handleSaveApiKey = () => {
-    localStorage.setItem(API_KEY_STORAGE, tempApiKey.trim());
-    setApiKey(tempApiKey.trim());
-    setShowConfig(false);
-  };
+    localStorage.setItem(API_KEY_STORAGE, tempApiKey.trim())
+    setApiKey(tempApiKey.trim())
+    setShowConfig(false)
+  }
 
   const handleNewChat = () => {
-    try {
-      localStorage.removeItem(CHAT_HISTORY_STORAGE);
-    } catch {
-      // ignore
-    }
-    setMessages([
-      {
-        id: String(Date.now()),
-        role: "assistant",
-        content:
-          "Nova conversa iniciada! Como posso te ajudar em seus estudos bíblicos hoje?",
-        timestamp: new Date(),
-      },
-    ]);
-    setInput("");
-    onClearSelectedVerses();
-  };
+    const newId = String(Date.now())
+    setCurActiveSessionId(newId)
+    setActiveSessionId(newId)
 
-  const handleClearChat = handleNewChat;
+    const welcomeMsg: ChatMessage = {
+      id: String(Date.now()),
+      role: 'assistant',
+      content:
+        'Nova conversa iniciada! Como posso te ajudar em seus estudos bíblicos hoje?',
+      timestamp: new Date(),
+    }
+
+    setMessages([welcomeMsg])
+    setInput('')
+    onClearSelectedVerses()
+  }
+
+  const handleSelectSession = (selected: ChatSession) => {
+    setCurActiveSessionId(selected.id)
+    setActiveSessionId(selected.id)
+    setMessages(
+      selected.messages.map((m) => ({
+        ...m,
+        timestamp: new Date(m.timestamp),
+      }))
+    )
+    setInput('')
+  }
+
+  const handleDeleteSession = (id: string) => {
+    deleteSession(id)
+    const updated = loadAllSessions()
+    setSessions(updated)
+
+    if (activeSessionId === id) {
+      if (updated.length > 0) {
+        handleSelectSession(updated[0])
+      } else {
+        handleNewChat()
+      }
+    }
+  }
+
+  const handleClearAllSessions = () => {
+    clearAllSessions()
+    setSessions([])
+    handleNewChat()
+  }
 
   const handleSend = async (customPrompt?: string) => {
-    const textToSend = customPrompt || input;
-    if (!textToSend.trim() || isLoading) return;
+    const textToSend = customPrompt || input
+    if (!textToSend.trim() || isLoading) return
 
     const userMsg: ChatMessage = {
       id: String(Date.now()),
-      role: "user",
+      role: 'user',
       content: textToSend.trim(),
       timestamp: new Date(),
-    };
+    }
 
-    setMessages((prev) => [...prev, userMsg]);
-    if (!customPrompt) setInput("");
-    setIsLoading(true);
+    const updatedWithUser = [...messages, userMsg]
+    setMessages(updatedWithUser)
+    persistMessagesToSession(updatedWithUser, userMsg.content)
+
+    if (!customPrompt) setInput('')
+    setIsLoading(true)
 
     try {
-      let reply = "";
+      let reply = ''
 
       if (apiKey) {
-        const hasSelectedVerses = selectedVersesText.length > 0;
+        const hasSelectedVerses = selectedVersesText.length > 0
         const verseContext = hasSelectedVerses
-          ? selectedVersesText.map((v) => `[${v.verse}] ${v.text}`).join(" ")
-          : "";
+          ? selectedVersesText.map((v) => `[${v.verse}] ${v.text}`).join(' ')
+          : ''
 
         const contextInstruction = hasSelectedVerses
           ? `O usuário selecionou os seguintes versículos específicos de ${book.name} ${chapter} para análise: "${verseContext}". Foque sua resposta especificamente neles.`
-          : "O usuário fez uma pergunta aberta ou geral. Responda à pergunta dele diretamente sem forçar ligação com capítulos ou livros bíblicos específicos, a menos que ele mencione.";
+          : 'O usuário fez uma pergunta aberta ou geral. Responda à pergunta dele diretamente sem forçar ligação com capítulos ou livros bíblicos específicos, a menos que ele mencione.'
 
         const prompt = `Você é um teólogo bíblico erudito e devoto que responde com base estrita nos princípios, doutrinas e cosmovisão da Igreja Adventista do Sétimo Dia (IASD).
 
@@ -282,40 +344,40 @@ Diretrizes fundamentais para sua resposta:
 ${contextInstruction}
 
 Pergunta do usuário:
-${userMsg.content}`;
+${userMsg.content}`
 
-        let success = false;
-        let lastError = "";
+        let success = false
+        let lastError = ''
 
         for (const model of CANDIDATE_MODELS) {
           try {
             const response = await fetch(
               `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
               {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   contents: [{ parts: [{ text: prompt }] }],
                 }),
-              },
-            );
+              }
+            )
 
             if (response.ok) {
-              const data = await response.json();
-              reply = extractResponseText(data);
-              success = true;
-              break;
+              const data = await response.json()
+              reply = extractResponseText(data)
+              success = true
+              break
             } else {
-              const errData = await response.json().catch(() => null);
+              const errData = await response.json().catch(() => null)
               lastError =
                 errData?.error?.message ||
-                `Erro ${response.status} ao consultar ${model}`;
+                `Erro ${response.status} ao consultar ${model}`
             }
           } catch (e: unknown) {
             if (e instanceof Error) {
-              lastError = e.message;
+              lastError = e.message
             } else {
-              lastError = "Falha na conexão com a API";
+              lastError = 'Falha na conexão com a API'
             }
           }
         }
@@ -323,33 +385,33 @@ ${userMsg.content}`;
         if (!success) {
           try {
             const listRes = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`,
-            );
+              `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`
+            )
             if (listRes.ok) {
-              const listData = await listRes.json();
+              const listData = await listRes.json()
               const availableModels: string[] = (listData.models || [])
                 .filter((m: { supportedGenerationMethods?: string[] }) =>
-                  m.supportedGenerationMethods?.includes("generateContent"),
+                  m.supportedGenerationMethods?.includes('generateContent')
                 )
-                .map((m: { name: string }) => m.name.replace(/^models\//, ""));
+                .map((m: { name: string }) => m.name.replace(/^models\//, ''))
 
               for (const model of availableModels) {
                 const response = await fetch(
                   `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
                   {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                       contents: [{ parts: [{ text: prompt }] }],
                     }),
-                  },
-                );
+                  }
+                )
 
                 if (response.ok) {
-                  const data = await response.json();
-                  reply = extractResponseText(data);
-                  success = true;
-                  break;
+                  const data = await response.json()
+                  reply = extractResponseText(data)
+                  success = true
+                  break
                 }
               }
             }
@@ -360,55 +422,58 @@ ${userMsg.content}`;
 
         if (!success) {
           throw new Error(
-            lastError || "Não foi possível conectar aos modelos do Gemini.",
-          );
+            lastError || 'Não foi possível conectar aos modelos do Gemini.'
+          )
         }
       } else {
-        await new Promise((res) => setTimeout(res, 600));
+        await new Promise((res) => setTimeout(res, 600))
         if (selectedVersesText.length > 0) {
           reply = `Comentário Teológico IASD sobre **${book.name} ${chapter}:${selectedVersesText
             .map((v) => v.verse)
-            .join(",")}**:
+            .join(',')}**:
 
-📖 **Versículos:** "${selectedVersesText.map((v) => v.text).join(" ")}"
+📖 **Versículos:** "${selectedVersesText.map((v) => v.text).join(' ')}"
 
 * **Princípio Bíblico:** A passagem revela a soberania divina dentro da perspectiva do Grande Conflito.
 * **Aplicação Prática:** Submissão à vontade de Deus e fidelidade aos Seus mandamentos.
 
-*(Insira sua chave de API para análises personalizadas em tempo real)*`;
+*(Insira sua chave de API para análises personalizadas em tempo real)*`
         } else {
           reply = `**Perspectiva Teológica IASD:**
-Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvida de fé deve ser avaliada à luz da harmonia total das Escrituras Sagradas, ressaltando a graça salvadora de Cristo, a santidade da Lei de Deus e a esperança do Seu breve retorno.`;
+Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvida de fé deve ser avaliada à luz da harmonia total das Escrituras Sagradas, ressaltando a graça salvadora de Cristo, a santidade da Lei de Deus e a esperança do Seu breve retorno.`
         }
       }
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now() + 1),
-          role: "assistant",
-          content: reply,
-          timestamp: new Date(),
-        },
-      ]);
+      const assistantMsg: ChatMessage = {
+        id: String(Date.now() + 1),
+        role: 'assistant',
+        content: reply,
+        timestamp: new Date(),
+      }
+
+      const updatedWithAssistant = [...updatedWithUser, assistantMsg]
+      setMessages(updatedWithAssistant)
+      persistMessagesToSession(updatedWithAssistant)
     } catch (err: unknown) {
       const errorMsg =
         err instanceof Error
           ? err.message
-          : "Verifique se a sua chave de API está correta.";
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now() + 1),
-          role: "assistant",
-          content: `Ocorreu um erro ao consultar o assistente:\n\n${errorMsg}`,
-          timestamp: new Date(),
-        },
-      ]);
+          : 'Verifique se a sua chave de API está correta.'
+
+      const errorChatMsg: ChatMessage = {
+        id: String(Date.now() + 1),
+        role: 'assistant',
+        content: `Ocorreu um erro ao consultar o assistente:\n\n${errorMsg}`,
+        timestamp: new Date(),
+      }
+
+      const updatedWithError = [...updatedWithUser, errorChatMsg]
+      setMessages(updatedWithError)
+      persistMessagesToSession(updatedWithError)
     } finally {
-      setIsLoading(false);
+      setIsLoading(false)
     }
-  };
+  }
 
   return (
     <aside
@@ -417,21 +482,21 @@ Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvid
     >
       <div
         onMouseDown={(e) => {
-          e.preventDefault();
-          setIsDragging(true);
+          e.preventDefault()
+          setIsDragging(true)
         }}
         title="Arraste para redimensionar o painel"
         className={cn(
-          "absolute -left-1.5 top-0 bottom-0 w-3 cursor-col-resize z-40 group flex items-center justify-center transition-colors",
-          isDragging ? "bg-primary/20" : "hover:bg-primary/20",
+          'absolute -left-1.5 top-0 bottom-0 w-3 cursor-col-resize z-40 group flex items-center justify-center transition-colors',
+          isDragging ? 'bg-primary/20' : 'hover:bg-primary/20'
         )}
       >
         <div
           className={cn(
-            "w-0.5 h-10 rounded-full transition-colors",
+            'w-0.5 h-10 rounded-full transition-colors',
             isDragging
-              ? "bg-primary"
-              : "bg-muted-foreground/30 group-hover:bg-primary",
+              ? 'bg-primary'
+              : 'bg-muted-foreground/30 group-hover:bg-primary'
           )}
         />
       </div>
@@ -480,11 +545,21 @@ Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvid
             variant="outline"
             size="sm"
             onClick={handleNewChat}
-            title="Iniciar nova conversa e limpar contexto"
+            title="Iniciar nova conversa e arquivar a atual"
             className="h-7 px-2 text-xs font-semibold gap-1 text-foreground hover:bg-muted shrink-0"
           >
             <Plus className="h-3.5 w-3.5 text-primary" />
-            <span>Novo</span>
+            <span className="hidden sm:inline">Novo</span>
+          </Button>
+
+          <Button
+            variant={showHistory ? 'default' : 'ghost'}
+            size="icon"
+            onClick={() => setShowHistory(!showHistory)}
+            title="Ver conversas anteriores salvas"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+          >
+            <History className="h-3.5 w-3.5" />
           </Button>
 
           <Button
@@ -496,15 +571,7 @@ Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvid
           >
             <Settings className="h-3.5 w-3.5" />
           </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleClearChat}
-            title="Limpar histórico de conversa"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+
           <Button
             variant="ghost"
             size="icon"
@@ -522,8 +589,7 @@ Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvid
             Chave de API do Google Gemini
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Insira sua chave gratuita do Google AI Studio para ter respostas
-            completas.
+            Insira sua chave gratuita do Google AI Studio para ter respostas completas.
           </p>
           <input
             type="password"
@@ -559,7 +625,7 @@ Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvid
             <BookOpen className="h-3.5 w-3.5 shrink-0" />
             <span className="truncate">
               Contexto ativo: {book.name} {chapter}:
-              {selectedVersesText.map((v) => v.verse).join(", ")}
+              {selectedVersesText.map((v) => v.verse).join(', ')}
             </span>
           </div>
           <Button
@@ -595,15 +661,13 @@ Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvid
             onClick={() =>
               handleSend(
                 selectedVersesText.length > 0
-                  ? "Explique a visão teológica e o contexto desta passagem"
-                  : "Quais são os pilares fundamentais da mensagem bíblica adventista?",
+                  ? 'Explique a visão teológica e o contexto desta passagem'
+                  : 'Quais são os pilares fundamentais da mensagem bíblica adventista?'
               )
             }
             className="text-[10px] h-6 px-2 whitespace-nowrap shrink-0"
           >
-            {selectedVersesText.length > 0
-              ? "Explicar Passagem"
-              : "Pilares Bíblicos"}
+            {selectedVersesText.length > 0 ? 'Explicar Passagem' : 'Pilares Bíblicos'}
           </Button>
           <Button
             variant="outline"
@@ -611,15 +675,13 @@ Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvid
             onClick={() =>
               handleSend(
                 selectedVersesText.length > 0
-                  ? "Como esta passagem se relaciona com a doutrina adventista?"
-                  : "O que a Bíblia ensina sobre o sábado e o grande conflito?",
+                  ? 'Como esta passagem se relaciona com a doutrina adventista?'
+                  : 'O que a Bíblia ensina sobre o sábado e o grande conflito?'
               )
             }
             className="text-[10px] h-6 px-2 whitespace-nowrap shrink-0"
           >
-            {selectedVersesText.length > 0
-              ? "Doutrina Bíblica"
-              : "Sábado & Conflito"}
+            {selectedVersesText.length > 0 ? 'Doutrina Bíblica' : 'Sábado & Conflito'}
           </Button>
           <Button
             variant="outline"
@@ -627,22 +689,20 @@ Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvid
             onClick={() =>
               handleSend(
                 selectedVersesText.length > 0
-                  ? "Qual a aplicação prática e espiritual deste texto?"
-                  : "O que a Bíblia ensina sobre o estado do ser humano na morte?",
+                  ? 'Qual a aplicação prática e espiritual deste texto?'
+                  : 'O que a Bíblia ensina sobre o estado do ser humano na morte?'
               )
             }
             className="text-[10px] h-6 px-2 whitespace-nowrap shrink-0"
           >
-            {selectedVersesText.length > 0
-              ? "Aplicação Prática"
-              : "Estado dos Mortos"}
+            {selectedVersesText.length > 0 ? 'Aplicação Prática' : 'Estado dos Mortos'}
           </Button>
         </div>
 
         <form
           onSubmit={(e) => {
-            e.preventDefault();
-            handleSend();
+            e.preventDefault()
+            handleSend()
           }}
           className="flex gap-2"
         >
@@ -650,8 +710,8 @@ Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvid
             type="text"
             placeholder={
               selectedVersesText.length > 0
-                ? "Perguntar sobre os versículos selecionados..."
-                : "Pergunte qualquer coisa sobre a Bíblia..."
+                ? 'Perguntar sobre os versículos selecionados...'
+                : 'Pergunte qualquer coisa sobre a Bíblia...'
             }
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -668,6 +728,17 @@ Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvid
           </Button>
         </form>
       </div>
+
+      <ChatHistoryDrawer
+        isOpen={showHistory}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onClose={() => setShowHistory(false)}
+        onSelectSession={handleSelectSession}
+        onDeleteSession={handleDeleteSession}
+        onClearAll={handleClearAllSessions}
+        onNewChat={handleNewChat}
+      />
     </aside>
-  );
+  )
 }
