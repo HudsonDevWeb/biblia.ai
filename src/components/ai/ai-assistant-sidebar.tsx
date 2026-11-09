@@ -7,6 +7,7 @@ import {
   BookOpen,
   Loader2,
   Trash2,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -207,7 +208,7 @@ export function AiAssistantSidebar({
     setShowConfig(false);
   };
 
-  const handleClearChat = () => {
+  const handleNewChat = () => {
     try {
       localStorage.removeItem(CHAT_HISTORY_STORAGE);
     } catch {
@@ -217,11 +218,16 @@ export function AiAssistantSidebar({
       {
         id: String(Date.now()),
         role: "assistant",
-        content: "Conversa limpa. Pode fazer sua próxima pergunta.",
+        content:
+          "Nova conversa iniciada! Como posso te ajudar em seus estudos bíblicos hoje?",
         timestamp: new Date(),
       },
     ]);
+    setInput("");
+    onClearSelectedVerses();
   };
+
+  const handleClearChat = handleNewChat;
 
   const handleSend = async (customPrompt?: string) => {
     const textToSend = customPrompt || input;
@@ -469,6 +475,17 @@ Sob a ótica adventista fundamentada em *Sola Scriptura*, toda doutrina e dúvid
               A+
             </Button>
           </div>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleNewChat}
+            title="Iniciar nova conversa e limpar contexto"
+            className="h-7 px-2 text-xs font-semibold gap-1 text-foreground hover:bg-muted shrink-0"
+          >
+            <Plus className="h-3.5 w-3.5 text-primary" />
+            <span>Novo</span>
+          </Button>
 
           <Button
             variant="ghost"
